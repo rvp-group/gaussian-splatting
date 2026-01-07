@@ -26,6 +26,9 @@ from argparse import ArgumentParser
 from arguments import ModelParams, PipelineParams, get_combined_args
 from gaussian_renderer import GaussianModel, render
 from scene.dataset_readers import loadCameras
+from time import time, perf_counter
+from utils.loss_utils import l1_loss, ssim, l1_loss_mask, ssim_loss_mask
+from icecream import ic
 
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background):
@@ -45,7 +48,95 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         torchvision.utils.save_image(
             rendering, os.path.join(render_path, "{0:05d}".format(idx) + ".png")
         )
-        # torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
+        torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
+
+def render_set_optimize(model_path, name, iteration, views, gaussians, pipeline, background):
+    render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
+    gts_path = os.path.join(model_path,name,"ours_{}".format(iteration), "gt")
+    makedirs(render_path, exist_ok=True)
+    makedirs(gts_path, exist_ok=True)
+
+    gaussians._xyz.requires_grad_(False)
+    gaussians._features_dc.requires_grad_(False)
+    gaussians._features_rest.requires_grad_(False)
+    gaussians._opacity.requires_grad_(False)
+    gaussians._scaling.requires_grad_(False)
+    gaussians._rotation.requires_grad_(False)
+
+    for idx, view in enumerate(tqdm(views, desc="Rendering progress")):
+        num_iter = args.optim_test_pose_iter
+        camera_pose = get_tensor_from_camera(view.world_view_transform.transpose(0, 1))
+
+        camera_tensor_T = camera_pose[-3:].requires_grad_()
+        camera_tensor_q = camera_pose[:4].requires_grad_()
+        pose_optimizer = torch.optim.Adam([
+            {"params": [camera_tensor_T], "lr": 0.003},
+            {"params": [camera_tensor_q], "lr": 0.001}
+        ],
+        betas=(0.9, 0.999),
+        weight_decay=1e-4
+        )
+
+        # Add a learning rate scheduler
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(pose_optimizer, T_max=num_iter, eta_min=0.0001)
+        with tqdm(total=num_iter, desc=f"Tracking Time Step: {idx+1}", leave=True) as progress_bar:
+            candidate_q = camera_tensor_q.clone().detach()
+            candidate_T = camera_tensor_T.clone().detach()
+            current_min_loss = float(1e20)
+            gt = view.original_image[0:3, :, :]
+            initial_loss = None
+
+            for iteration in range(num_iter):
+                rendering = render(view, gaussians, pipeline, background, camera_pose=torch.cat([camera_tensor_q, camera_tensor_T]))["render"]
+                black_hole_threshold = 0.0
+                mask = (rendering > black_hole_threshold).float()
+                loss = l1_loss_mask(rendering, gt, mask)
+                loss.backward()
+                with torch.no_grad():
+                    pose_optimizer.step()
+                    pose_optimizer.zero_grad(set_to_none=True)
+
+                    if iteration == 0:
+                        initial_loss = loss.item()  # Capture initial loss
+
+                    if loss < current_min_loss:
+                        current_min_loss = loss
+                        candidate_q = camera_tensor_q.clone().detach()
+                        candidate_T = camera_tensor_T.clone().detach()
+
+                    progress_bar.update(1)
+                    progress_bar.set_postfix(loss=loss.item(), initial_loss=initial_loss)
+                scheduler.step()
+
+            camera_tensor_q = candidate_q
+            camera_tensor_T = candidate_T
+
+        optimal_pose = torch.cat([camera_tensor_q, camera_tensor_T])
+        # print("optimal_pose-camera_pose: ", optimal_pose-camera_pose)
+        rendering_opt = render(view, gaussians, pipeline, background, camera_pose=optimal_pose)["render"]
+            
+        torchvision.utils.save_image(
+            rendering_opt, os.path.join(render_path, view.image_name + ".png")
+        )
+        torchvision.utils.save_image(
+            gt, os.path.join(gts_path, view.image_name + ".png")
+        )
+
+    if args.test_fps:
+        print(">>> Calculate FPS: ")
+        fps_list = []
+        for _ in range(1000):
+            start = perf_counter()
+            _ = render(view, gaussians, pipeline, background, camera_pose=optimal_pose)
+            end = perf_counter()
+            fps_list.append(end - start)        
+        fps_list.sort()
+        fps_list = fps_list[100:900]
+        fps = 1 / (sum(fps_list) / len(fps_list))
+        print(">>> FPS = ", fps)
+        with open(f"{model_path}/total_fps.json", 'a') as fp:
+            json.dump(f'{fps}', fp, indent=True)
+            fp.write('\n')
 
 
 def render_sets(
@@ -94,7 +185,7 @@ def render_sets(
                 background,
             )
         end_time = time()
-        save_time(dataset.model_path, "[4] render", end_time - start_time)
+        # save_time(dataset.model_path, "[4] render", end_time - start_time)
 
 
 if __name__ == "__main__":
