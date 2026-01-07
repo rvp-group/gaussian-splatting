@@ -1,0 +1,7 @@
+[environment]
+# extra-paths = [
+#   "./mast3r",              # for `import mast3r`
+#   "./mast3r/dust3r",       # for `import dust3r`
+#   "./gaussian-splatting"
+# ]
+python = "../.pixi/envs/default"
