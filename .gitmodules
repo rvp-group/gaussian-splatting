@@ -11,3 +11,6 @@
 [submodule "submodules/fused-ssim"]
 	path = submodules/fused-ssim
 	url = https://github.com/rahul-goel/fused-ssim.git
+[submodule "submodules/diff-surfel-rasterization"]
+	path = submodules/diff-surfel-rasterization
+	url = https://github.com/hbb1/diff-surfel-rasterization

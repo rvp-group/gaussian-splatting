@@ -276,8 +276,6 @@ def readColmapSceneInfo(path, images, eval, args, llffhold=8):
         train_poses = sorted_poses
         test_poses = []
 
-    ic(cam_infos)
-
     nerf_normalization = getNerfppNorm(train_cam_infos)
 
     ply_path = os.path.join(path, f"sparse_{args.n_views}/0/points3D.ply")

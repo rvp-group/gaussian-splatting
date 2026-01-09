@@ -18,6 +18,7 @@ import numpy as np
 from utils.system_utils import searchForMaxIteration
 from scene.dataset_readers import sceneLoadTypeCallbacks
 from scene.gaussian_model import GaussianModel
+from scene.surfel_model import SurfelModel
 from arguments import ModelParams
 from utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
 from utils.graphics_utils import compute_scale_gaussian_by_project_pair_pcd, fov2focal

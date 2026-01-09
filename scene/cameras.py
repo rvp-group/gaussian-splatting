@@ -87,6 +87,7 @@ class Camera(nn.Module):
             )
         ).squeeze(0)
         self.camera_center = self.world_view_transform.inverse()[3, :3]
+        self.gt_alpha_mask = gt_alpha_mask
 
 
 class MiniCam:
