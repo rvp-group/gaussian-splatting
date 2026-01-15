@@ -14,21 +14,30 @@
 import numpy as np
 from pathlib import Path
 import torch
+import yaml
+import json
 from scene import Scene
 import os
+import sys
 from tqdm import tqdm
 from os import makedirs
 from gaussian_renderer import render
 import torchvision
 from utils.general_utils import safe_state
 from utils.pose_utils import get_tensor_from_camera
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, get_combined_args
 from gaussian_renderer import GaussianModel, render
 from scene.dataset_readers import loadCameras
 from time import time, perf_counter
 from utils.loss_utils import l1_loss, ssim, l1_loss_mask, ssim_loss_mask
 from icecream import ic
+
+import typer
+from rich.console import Console
+from typing_extensions import Annotated
+
+console = Console()
 
 
 def render_set(model_path, name, iteration, views, gaussians, pipeline, background):
@@ -48,11 +57,16 @@ def render_set(model_path, name, iteration, views, gaussians, pipeline, backgrou
         torchvision.utils.save_image(
             rendering, os.path.join(render_path, "{0:05d}".format(idx) + ".png")
         )
-        torchvision.utils.save_image(gt, os.path.join(gts_path, '{0:05d}'.format(idx) + ".png"))
+        torchvision.utils.save_image(
+            gt, os.path.join(gts_path, "{0:05d}".format(idx) + ".png")
+        )
 
-def render_set_optimize(model_path, name, iteration, views, gaussians, pipeline, background):
+
+def render_set_optimize(
+    model_path, name, iteration, views, gaussians, pipeline, background, args
+):
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
-    gts_path = os.path.join(model_path,name,"ours_{}".format(iteration), "gt")
+    gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
     makedirs(render_path, exist_ok=True)
     makedirs(gts_path, exist_ok=True)
 
@@ -69,17 +83,22 @@ def render_set_optimize(model_path, name, iteration, views, gaussians, pipeline,
 
         camera_tensor_T = camera_pose[-3:].requires_grad_()
         camera_tensor_q = camera_pose[:4].requires_grad_()
-        pose_optimizer = torch.optim.Adam([
-            {"params": [camera_tensor_T], "lr": 0.003},
-            {"params": [camera_tensor_q], "lr": 0.001}
-        ],
-        betas=(0.9, 0.999),
-        weight_decay=1e-4
+        pose_optimizer = torch.optim.Adam(
+            [
+                {"params": [camera_tensor_T], "lr": 0.003},
+                {"params": [camera_tensor_q], "lr": 0.001},
+            ],
+            betas=(0.9, 0.999),
+            weight_decay=1e-4,
         )
 
         # Add a learning rate scheduler
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(pose_optimizer, T_max=num_iter, eta_min=0.0001)
-        with tqdm(total=num_iter, desc=f"Tracking Time Step: {idx+1}", leave=True) as progress_bar:
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            pose_optimizer, T_max=num_iter, eta_min=0.0001
+        )
+        with tqdm(
+            total=num_iter, desc=f"Tracking Time Step: {idx + 1}", leave=True
+        ) as progress_bar:
             candidate_q = camera_tensor_q.clone().detach()
             candidate_T = camera_tensor_T.clone().detach()
             current_min_loss = float(1e20)
@@ -87,7 +106,13 @@ def render_set_optimize(model_path, name, iteration, views, gaussians, pipeline,
             initial_loss = None
 
             for iteration in range(num_iter):
-                rendering = render(view, gaussians, pipeline, background, camera_pose=torch.cat([camera_tensor_q, camera_tensor_T]))["render"]
+                rendering = render(
+                    view,
+                    gaussians,
+                    pipeline,
+                    background,
+                    camera_pose=torch.cat([camera_tensor_q, camera_tensor_T]),
+                )["render"]
                 black_hole_threshold = 0.0
                 mask = (rendering > black_hole_threshold).float()
                 loss = l1_loss_mask(rendering, gt, mask)
@@ -105,7 +130,9 @@ def render_set_optimize(model_path, name, iteration, views, gaussians, pipeline,
                         candidate_T = camera_tensor_T.clone().detach()
 
                     progress_bar.update(1)
-                    progress_bar.set_postfix(loss=loss.item(), initial_loss=initial_loss)
+                    progress_bar.set_postfix(
+                        loss=loss.item(), initial_loss=initial_loss
+                    )
                 scheduler.step()
 
             camera_tensor_q = candidate_q
@@ -113,8 +140,10 @@ def render_set_optimize(model_path, name, iteration, views, gaussians, pipeline,
 
         optimal_pose = torch.cat([camera_tensor_q, camera_tensor_T])
         # print("optimal_pose-camera_pose: ", optimal_pose-camera_pose)
-        rendering_opt = render(view, gaussians, pipeline, background, camera_pose=optimal_pose)["render"]
-            
+        rendering_opt = render(
+            view, gaussians, pipeline, background, camera_pose=optimal_pose
+        )["render"]
+
         torchvision.utils.save_image(
             rendering_opt, os.path.join(render_path, view.image_name + ".png")
         )
@@ -129,14 +158,14 @@ def render_set_optimize(model_path, name, iteration, views, gaussians, pipeline,
             start = perf_counter()
             _ = render(view, gaussians, pipeline, background, camera_pose=optimal_pose)
             end = perf_counter()
-            fps_list.append(end - start)        
+            fps_list.append(end - start)
         fps_list.sort()
         fps_list = fps_list[100:900]
         fps = 1 / (sum(fps_list) / len(fps_list))
         print(">>> FPS = ", fps)
-        with open(f"{model_path}/total_fps.json", 'a') as fp:
-            json.dump(f'{fps}', fp, indent=True)
-            fp.write('\n')
+        with open(f"{model_path}/total_fps.json", "a") as fp:
+            json.dump(f"{fps}", fp, indent=True)
+            fp.write("\n")
 
 
 def render_sets(
@@ -183,12 +212,88 @@ def render_sets(
                 gaussians,
                 pipeline,
                 background,
+                args,
             )
         end_time = time()
         # save_time(dataset.model_path, "[4] render", end_time - start_time)
 
 
-if __name__ == "__main__":
+def build_args_from_config(data_cf: dict) -> Namespace:
+    """Build an argparse-compatible Namespace from YAML config."""
+    render_cf = data_cf.get("render", {})
+
+    args_dict = {
+        # Common paths
+        "source_path": data_cf.get("source_path", ""),
+        "model_path": data_cf.get("model_path", ""),
+        "n_views": data_cf.get("n_views", 0),
+        # Script-specific args
+        "iterations": render_cf.get("iterations", -1),
+        "skip_train": render_cf.get("skip_train", False),
+        "skip_test": render_cf.get("skip_test", False),
+        "quiet": render_cf.get("quiet", False),
+        "optim_test_pose_iter": render_cf.get("optim_test_pose_iter", 500),
+        "infer_video": render_cf.get("infer_video", False),
+        "test_fps": render_cf.get("test_fps", False),
+        # ModelParams
+        "sh_degree": render_cf.get("sh_degree", 3),
+        "images": render_cf.get("images", "images"),
+        "resolution": render_cf.get("resolution", -1),
+        "white_background": render_cf.get("white_background", False),
+        "data_device": render_cf.get("data_device", "cuda"),
+        "eval": render_cf.get("eval", False),
+        "render_items": render_cf.get(
+            "render_items", ["RGB", "Alpha", "Normal", "Depth", "Edge", "Curvature"]
+        ),
+        "init_scale_from_view_depth": render_cf.get(
+            "init_scale_from_view_depth", False
+        ),
+        # PipelineParams
+        "convert_SHs_python": render_cf.get("convert_SHs_python", False),
+        "compute_cov3D_python": render_cf.get("compute_cov3D_python", False),
+        "depth_ratio": render_cf.get("depth_ratio", 0.0),
+        "debug": render_cf.get("debug", False),
+    }
+    return Namespace(**args_dict)
+
+
+def main_typer(
+    config_path: Annotated[
+        str, typer.Argument(help="Path of the config file")
+    ] = "./configurations/barn.cfg",
+) -> None:
+    """Rendering script using YAML config."""
+    config = Path(config_path)
+    if not config.exists():
+        console.print(f"[red]Error: config file {config} does not exist![/red]")
+        sys.exit(-1)
+
+    with open(config, "r") as f:
+        data_cf = yaml.safe_load(f)
+
+    args = build_args_from_config(data_cf)
+
+    console.print(f"Rendering {args.model_path}")
+
+    # Create dummy parser for ParamGroup extraction
+    parser = ArgumentParser()
+    model = ModelParams(parser, sentinel=False)
+    pipeline = PipelineParams(parser)
+
+    render_sets(
+        model.extract(args),
+        args.iterations,
+        pipeline.extract(args),
+        args.skip_train,
+        args.skip_test,
+        args,
+    )
+
+    console.print("\n[green]Rendering complete.[/green]")
+
+
+def main_argparse():
+    """Original argparse-based entry point (fallback)."""
     # Set up command line argument parser
     parser = ArgumentParser(description="Testing script parameters")
     model = ModelParams(parser, sentinel=False)
@@ -214,3 +319,13 @@ if __name__ == "__main__":
         args.skip_test,
         args,
     )
+
+    print("\nRendering complete.")
+
+
+if __name__ == "__main__":
+    # Check if first argument looks like a config file path
+    if len(sys.argv) > 1 and sys.argv[1].endswith((".cfg", ".yaml", ".yml")):
+        typer.run(main_typer)
+    else:
+        main_argparse()

@@ -14,10 +14,16 @@ import sys
 import torch
 import numpy as np
 import uuid
+import yaml
 
+from pathlib import Path
 from time import time
 from tqdm import tqdm
 from random import randint
+
+import typer
+from rich.console import Console
+from typing_extensions import Annotated
 
 from scene import Scene, SurfelModel
 from gaussian_renderer import render, render2D, network_gui
@@ -30,6 +36,8 @@ from utils.pose_utils import get_camera_from_tensor
 from argparse import ArgumentParser, Namespace
 from arguments import ModelParams, PipelineParams, OptimizationParams
 from icecream import ic
+
+console = Console()
 
 
 try:
@@ -471,8 +479,115 @@ def training_report(
         torch.cuda.empty_cache()
 
 
-if __name__ == "__main__":
-    # Set up command line argument parser
+def build_args_from_config(data_cf: dict) -> Namespace:
+    """Build an argparse-compatible Namespace from YAML config."""
+    train_cf = data_cf.get("train", {})
+
+    args_dict = {
+        # Common paths
+        "source_path": data_cf.get("source_path", ""),
+        "model_path": data_cf.get("model_path", ""),
+        "n_views": data_cf.get("n_views", 0),
+        # Script-specific args
+        "ip": train_cf.get("ip", "127.0.0.1"),
+        "port": train_cf.get("port", 6009),
+        "detect_anomaly": train_cf.get("detect_anomaly", False),
+        "test_iterations": train_cf.get("test_iterations", []),
+        "save_iterations": list(train_cf.get("save_iterations", [])),
+        "checkpoint_iterations": train_cf.get("checkpoint_iterations", []),
+        "start_checkpoint": train_cf.get("start_checkpoint"),
+        "quiet": train_cf.get("quiet", False),
+        "disable_viewer": train_cf.get("disable_viewer", True),
+        # ModelParams
+        "sh_degree": train_cf.get("sh_degree", 3),
+        "images": train_cf.get("images", "images"),
+        "resolution": train_cf.get("resolution", -1),
+        "white_background": train_cf.get("white_background", False),
+        "data_device": train_cf.get("data_device", "cuda"),
+        "eval": train_cf.get("eval", False),
+        "render_items": train_cf.get(
+            "render_items", ["RGB", "Alpha", "Normal", "Depth", "Edge", "Curvature"]
+        ),
+        "init_scale_from_view_depth": train_cf.get("init_scale_from_view_depth", False),
+        # PipelineParams
+        "convert_SHs_python": train_cf.get("convert_SHs_python", False),
+        "compute_cov3D_python": train_cf.get("compute_cov3D_python", False),
+        "depth_ratio": train_cf.get("depth_ratio", 0.0),
+        "debug": train_cf.get("debug", False),
+        # OptimizationParams
+        "iterations": train_cf.get("iterations", 30000),
+        "position_lr_init": train_cf.get("position_lr_init", 0.00016),
+        "position_lr_final": train_cf.get("position_lr_final", 0.0000016),
+        "position_lr_delay_mult": train_cf.get("position_lr_delay_mult", 0.01),
+        "position_lr_max_steps": train_cf.get("position_lr_max_steps", 30000),
+        "feature_lr": train_cf.get("feature_lr", 0.0025),
+        "opacity_lr": train_cf.get("opacity_lr", 0.05),
+        "scaling_lr": train_cf.get("scaling_lr", 0.005),
+        "rotation_lr": train_cf.get("rotation_lr", 0.001),
+        "percent_dense": train_cf.get("percent_dense", 0.01),
+        "lambda_dssim": train_cf.get("lambda_dssim", 0.2),
+        "lambda_dist": train_cf.get("lambda_dist", 0.0),
+        "lambda_normal": train_cf.get("lambda_normal", 0.05),
+        "opacity_cull": train_cf.get("opacity_cull", 0.05),
+        "densification_interval": train_cf.get("densification_interval", 100),
+        "opacity_reset_interval": train_cf.get("opacity_reset_interval", 3000),
+        "densify_from_iter": train_cf.get("densify_from_iter", 500),
+        "densify_until_iter": train_cf.get("densify_until_iter", 15000),
+        "densify_grad_threshold": train_cf.get("densify_grad_threshold", 0.0002),
+        "random_background": train_cf.get("random_background", False),
+        "pp_optimizer": train_cf.get("pp_optimizer", False),
+        "optim_pose": train_cf.get("optim_pose", False),
+    }
+    return Namespace(**args_dict)
+
+
+def main_typer(
+    config_path: Annotated[
+        str, typer.Argument(help="Path of the config file")
+    ] = "./configurations/barn.cfg",
+) -> None:
+    """Training script using YAML config."""
+    config = Path(config_path)
+    if not config.exists():
+        console.print(f"[red]Error: config file {config} does not exist![/red]")
+        sys.exit(-1)
+
+    with open(config, "r") as f:
+        data_cf = yaml.safe_load(f)
+
+    args = build_args_from_config(data_cf)
+    args.save_iterations.append(args.iterations)
+
+    console.print(f"Optimizing {args.model_path}")
+
+    # Initialize system state (RNG)
+    safe_state(args.quiet)
+
+    # Create dummy parser for ParamGroup extraction
+    parser = ArgumentParser()
+    lp = ModelParams(parser)
+    op = OptimizationParams(parser)
+    pp = PipelineParams(parser)
+
+    # Start GUI server, configure and run training
+    if not args.disable_viewer:
+        network_gui.init(args.ip, args.port)
+    torch.autograd.set_detect_anomaly(args.detect_anomaly)
+    training(
+        lp.extract(args),
+        op.extract(args),
+        pp.extract(args),
+        args.test_iterations,
+        args.save_iterations,
+        args.checkpoint_iterations,
+        args.start_checkpoint,
+    )
+
+    console.print("\n[green]Training complete.[/green]")
+
+
+def main_argparse():
+    """Original argparse-based entry point (fallback)."""
     parser = ArgumentParser(description="Training script parameters")
     lp = ModelParams(parser)
     op = OptimizationParams(parser)
@@ -510,3 +625,11 @@ if __name__ == "__main__":
 
     # All done
     print("\nTraining complete.")
+
+
+if __name__ == "__main__":
+    # Check if first argument looks like a config file path
+    if len(sys.argv) > 1 and sys.argv[1].endswith((".cfg", ".yaml", ".yml")):
+        typer.run(main_typer)
+    else:
+        main_argparse()
