@@ -153,6 +153,8 @@ def training(
         iter_start.record()
         gaussians.update_learning_rate(iteration)
 
+        # Toggle camera pose optimization during Gaussian Splatting iterations
+        # When optim_pose is False, camera poses keep their initial values from MASt3R
         if opt.optim_pose == False:
             gaussians.P.requires_grad_(False)
 

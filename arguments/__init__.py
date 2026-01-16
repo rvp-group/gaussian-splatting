@@ -80,7 +80,7 @@ class PipelineParams(ParamGroup):
     def __init__(self, parser):
         self.convert_SHs_python = False
         self.compute_cov3D_python = False
-        self.depth_ratio=0.0
+        self.depth_ratio = 0.0
         self.debug = False
         super().__init__(parser, "Pipeline Parameters")
 
@@ -109,6 +109,8 @@ class OptimizationParams(ParamGroup):
         self.densify_grad_threshold = 0.0002
         self.random_background = False
         self.pp_optimizer = False
+        # Toggle camera pose optimization during training
+        # If False, camera poses remain fixed at their initial MASt3R values
         self.optim_pose = False
         super().__init__(parser, "Optimization Parameters")
 
