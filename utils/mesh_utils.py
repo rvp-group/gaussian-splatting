@@ -203,7 +203,6 @@ class GaussianExtractor(object):
                     mask = rendering > black_hole_threshold
                     loss = l1_loss_mask(rendering, gt, mask)
                     loss.backward()
-                    print(iteration, loss.item())
 
                     with torch.no_grad():
                         pose_optimizer.step()
@@ -217,6 +216,7 @@ class GaussianExtractor(object):
                             candidate_q = camera_tensor_q.clone().detach()
                             candidate_T = camera_tensor_T.clone().detach()
 
+                        progress_bar.set_postfix(loss=f"{loss.item():.6f}")
                         progress_bar.update(1)
                     torch.cuda.empty_cache()
                     scheduler.step()

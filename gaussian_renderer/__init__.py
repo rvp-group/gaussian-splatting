@@ -89,10 +89,12 @@ def render(
         else torch.eye(4).cuda()
     )
 
-    # Use the camera's original projection matrix
-    projmatrix = viewpoint_camera.projection_matrix
-    # Camera position is in C2W[:3, 3] (the translation column), not [3, :3] (homogeneous row)
-    camera_pos = rel_w2c.inverse()[:3, 3]
+    # Use identity view matrix since we'll transform Gaussians to camera space explicitly
+    w2c = torch.eye(4).cuda()
+    projmatrix = (
+        w2c.unsqueeze(0).bmm(viewpoint_camera.projection_matrix.unsqueeze(0))
+    ).squeeze(0)
+    camera_pos = w2c.inverse()[3, :3]
     raster_settings = GaussianRasterizationSettings3D(
         image_height=int(viewpoint_camera.image_height),
         image_width=int(viewpoint_camera.image_width),
@@ -100,7 +102,7 @@ def render(
         tanfovy=tanfovy,
         bg=bg_color,
         scale_modifier=scaling_modifier,
-        viewmatrix=rel_w2c,
+        viewmatrix=w2c,
         projmatrix=projmatrix,
         sh_degree=pc.active_sh_degree,
         campos=camera_pos,
@@ -110,11 +112,15 @@ def render(
 
     rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
-    # Gaussians are in world space - the rasterizer applies viewmatrix to transform to camera space
-    means3D = pc.get_xyz
-    means2D = screenspace_points
-    opacity = pc.get_opacity
+    # Transform Gaussians to camera space (like render2D does)
+    gaussians_xyz = pc._xyz.clone()
+    gaussians_rot = pc._rotation.clone()
+    xyz_ones = torch.ones(gaussians_xyz.shape[0], 1).cuda().float()
+    xyz_homo = torch.cat((gaussians_xyz, xyz_ones), dim=1)
+    gaussians_xyz_trans = (rel_w2c @ xyz_homo.T).T[:, :3]
+    gaussians_rot_trans = quadmultiply(camera_pose[:4], gaussians_rot)
 
+    means3D = gaussians_xyz_trans
     means2D = screenspace_points
     opacity = pc.get_opacity
 
@@ -128,7 +134,7 @@ def render(
         cov3D_precomp = pc.get_covariance(scaling_modifier)
     else:
         scales = pc.get_scaling
-        rotations = pc.get_rotation
+        rotations = torch.nn.functional.normalize(gaussians_rot_trans, dim=1)
 
     # If precomputed colors are provided, use them. Otherwise, if it is desired to precompute colors
     # from SHs in Python, do it. If not, then SH -> RGB conversion will be done by rasterizer.
