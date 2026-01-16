@@ -222,8 +222,38 @@ def main_typer(
     config_path: Annotated[
         str, typer.Argument(help="Path of the config file")
     ] = "./configurations/barn.cfg",
+    eval: Annotated[
+        bool, typer.Option("--eval", help="Enable evaluation mode")
+    ] = None,
+    skip_train: Annotated[
+        bool, typer.Option("--skip-train", help="Skip training set rendering")
+    ] = None,
+    skip_test: Annotated[
+        bool, typer.Option("--skip-test", help="Skip test set rendering")
+    ] = None,
+    skip_mesh: Annotated[
+        bool, typer.Option("--skip-mesh", help="Skip mesh extraction")
+    ] = None,
+    iterations: Annotated[
+        int, typer.Option("--iterations", "-i", help="Iteration to render")
+    ] = None,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", help="Suppress output")
+    ] = None,
+    optim_test_pose_iter: Annotated[
+        int, typer.Option("--optim-test-pose-iter", help="Test pose optimization iterations")
+    ] = None,
+    render_path: Annotated[
+        bool, typer.Option("--render-path", help="Render video path")
+    ] = None,
+    force_debug: Annotated[
+        bool, typer.Option("--force-debug", help="Force debug mode")
+    ] = None,
+    unbounded: Annotated[
+        bool, typer.Option("--unbounded", help="Use unbounded mesh extraction")
+    ] = None,
 ) -> None:
-    """Rendering script using YAML config."""
+    """Rendering script using YAML config with optional CLI overrides."""
     config = Path(config_path)
     if not config.exists():
         console.print(f"[red]Error: config file {config} does not exist![/red]")
@@ -233,6 +263,28 @@ def main_typer(
         data_cf = yaml.safe_load(f)
 
     args = build_args_from_config(data_cf)
+
+    # Override config values with CLI arguments if provided
+    if eval is not None:
+        args.eval = eval
+    if skip_train is not None:
+        args.skip_train = skip_train
+    if skip_test is not None:
+        args.skip_test = skip_test
+    if skip_mesh is not None:
+        args.skip_mesh = skip_mesh
+    if iterations is not None:
+        args.iterations = iterations
+    if quiet is not None:
+        args.quiet = quiet
+    if optim_test_pose_iter is not None:
+        args.optim_test_pose_iter = optim_test_pose_iter
+    if render_path is not None:
+        args.render_path = render_path
+    if force_debug is not None:
+        args.force_debug = force_debug
+    if unbounded is not None:
+        args.unbounded = unbounded
 
     console.print(f"Rendering {args.model_path}")
 

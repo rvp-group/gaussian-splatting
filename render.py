@@ -261,8 +261,32 @@ def main_typer(
     config_path: Annotated[
         str, typer.Argument(help="Path of the config file")
     ] = "./configurations/barn.cfg",
+    eval: Annotated[
+        bool, typer.Option("--eval", help="Enable evaluation mode")
+    ] = None,
+    skip_train: Annotated[
+        bool, typer.Option("--skip-train", help="Skip training set rendering")
+    ] = None,
+    skip_test: Annotated[
+        bool, typer.Option("--skip-test", help="Skip test set rendering")
+    ] = None,
+    iterations: Annotated[
+        int, typer.Option("--iterations", "-i", help="Iteration to render")
+    ] = None,
+    quiet: Annotated[
+        bool, typer.Option("--quiet", help="Suppress output")
+    ] = None,
+    optim_test_pose_iter: Annotated[
+        int, typer.Option("--optim-test-pose-iter", help="Test pose optimization iterations")
+    ] = None,
+    infer_video: Annotated[
+        bool, typer.Option("--infer-video", help="Infer video")
+    ] = None,
+    test_fps: Annotated[
+        bool, typer.Option("--test-fps", help="Test FPS")
+    ] = None,
 ) -> None:
-    """Rendering script using YAML config."""
+    """Rendering script using YAML config with optional CLI overrides."""
     config = Path(config_path)
     if not config.exists():
         console.print(f"[red]Error: config file {config} does not exist![/red]")
@@ -272,6 +296,24 @@ def main_typer(
         data_cf = yaml.safe_load(f)
 
     args = build_args_from_config(data_cf)
+
+    # Override config values with CLI arguments if provided
+    if eval is not None:
+        args.eval = eval
+    if skip_train is not None:
+        args.skip_train = skip_train
+    if skip_test is not None:
+        args.skip_test = skip_test
+    if iterations is not None:
+        args.iterations = iterations
+    if quiet is not None:
+        args.quiet = quiet
+    if optim_test_pose_iter is not None:
+        args.optim_test_pose_iter = optim_test_pose_iter
+    if infer_video is not None:
+        args.infer_video = infer_video
+    if test_fps is not None:
+        args.test_fps = test_fps
 
     console.print(f"Rendering {args.model_path}")
 
