@@ -35,7 +35,6 @@ from utils.general_utils import safe_state
 from utils.mesh_utils import GaussianExtractor, to_cam_open3d, post_process_mesh
 from utils.render_utils import generate_path, create_videos
 
-from icecream import ic
 # from utils.sfm_utils import save_time
 
 console = Console()
@@ -111,7 +110,6 @@ def run_rendering(args, dataset, iteration, pipe):
             print("export rendered testing images ...")
             os.makedirs(test_dir, exist_ok=True)
             start_time = time()
-            ic(args.optim_test_pose_iter)
             gaussExtractor.reconstruction_optim(
                 gaussians,
                 scene.getTestCameras(),

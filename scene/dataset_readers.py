@@ -33,7 +33,6 @@ from pathlib import Path
 from plyfile import PlyData, PlyElement
 from utils.sh_utils import SH2RGB
 from scene.gaussian_model import BasicPointCloud
-from icecream import ic
 
 
 class CameraInfo(NamedTuple):
@@ -148,9 +147,6 @@ def readColmapCameras(cam_extrinsics, cam_intrinsics, images_folder):
         width = intr.width
 
         uid = intr.id
-        print(
-            f"readColmapCameras | [DEBUG] setting uid to {intr.id} because extr.camera_id {extr.camera_id}"
-        )
         R = np.transpose(qvec2rotmat(extr.qvec))
         T = np.array(extr.tvec)
         pose = np.block([[R, T.reshape(3, 1)], [np.zeros((1, 3)), 1]])
@@ -243,8 +239,6 @@ def readColmapSceneInfo(path, images, eval, args, llffhold=8):
     if eval:
         cameras_extrinsic_file = os.path.join(path, f"sparse_{args.n_views}/1", "images.txt")
         cameras_intrinsic_file = os.path.join(path, f"sparse_{args.n_views}/1", "cameras.txt")
-        ic(cameras_extrinsic_file)
-        ic(cameras_intrinsic_file)
     else:
         cameras_extrinsic_file = os.path.join(path, f"sparse_{args.n_views}/0", "images.txt")
         cameras_intrinsic_file = os.path.join(path, f"sparse_{args.n_views}/0", "cameras.txt")

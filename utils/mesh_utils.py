@@ -23,7 +23,6 @@ from gaussian_renderer import render2D
 from utils.pose_utils import get_tensor_from_camera
 import matplotlib.pyplot as plt
 from PIL import Image
-from icecream import ic
 
 
 def post_process_mesh(mesh, cluster_to_keep=1000):
@@ -297,7 +296,6 @@ class GaussianExtractor(object):
             depth = self.depthmaps[i]
 
             # if we have mask provided, use it
-            ic(self.viewpoint_stack[i])
             if mask_background and (self.viewpoint_stack[i].gt_alpha_mask is not None):
                 depth[(self.viewpoint_stack[i].gt_alpha_mask < 0.5)] = 0
 
