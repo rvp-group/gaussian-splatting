@@ -11,28 +11,35 @@
 # modified code taken from
 # https://github.com/NVlabs/InstantSplat/blob/main/train.py
 
-import numpy as np
+import json
 import os
+import sys
+from pathlib import Path
+from random import randint
+
+import numpy as np
 import torch
 import yaml
-from random import randint
-from pathlib import Path
-from utils.loss_utils import l1_loss, ssim
-from utils.pose_utils import get_camera_from_tensor
-from gaussian_renderer import render, network_gui
+
+# Add parent directory to path for utils.loss_logger
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import sys
-from scene import Scene, GaussianModel
-from utils.general_utils import safe_state, get_expon_lr_func
 import uuid
-from tqdm import tqdm
-from utils.image_utils import psnr
 from argparse import ArgumentParser, Namespace
-from arguments import ModelParams, PipelineParams, OptimizationParams
 from time import time
 
 import typer
+from arguments import ModelParams, OptimizationParams, PipelineParams
+from gaussian_renderer import network_gui, render
 from rich.console import Console
+from scene import GaussianModel, Scene
+from tqdm import tqdm
 from typing_extensions import Annotated
+from utils.general_utils import safe_state
+from utils.image_utils import psnr
+from utils.loss_utils import l1_loss, ssim
+from utils.pose_utils import get_camera_from_tensor
 
 console = Console()
 
@@ -144,6 +151,32 @@ def training(
     viewpoint_indices = list(range(len(viewpoint_stack)))
     ema_loss_for_log = 0.0
 
+    # Initialize loss logger for experiments
+    exp_name = os.environ.get("EXPERIMENT_NAME")
+    loss_logger = None
+    if exp_name:
+        from utils.loss_logger import LossLogger
+
+        losses_file = Path(dataset.model_path) / "experiment_losses.json"
+        if losses_file.exists():
+            # Load existing data from init phase (preserves DUSt3R loss)
+            with open(losses_file) as f:
+                existing_data = json.load(f)
+            loss_logger = LossLogger(
+                output_path=losses_file,
+                experiment_name=exp_name,
+                config=existing_data.get("config", {}),
+            )
+            loss_logger.data = existing_data
+            loss_logger.data["config"]["optim_pose"] = opt.optim_pose
+            loss_logger.data["config"]["iterations"] = opt.iterations
+        else:
+            loss_logger = LossLogger(
+                output_path=losses_file,
+                experiment_name=exp_name,
+                config={"optim_pose": opt.optim_pose, "iterations": opt.iterations},
+            )
+
     progress_bar = tqdm(range(first_iter, opt.iterations), desc="Training progress")
     first_iter += 1
     start = time()
@@ -219,6 +252,16 @@ def training(
             if iteration % 10 == 0:
                 progress_bar.set_postfix({"Loss": f"{ema_loss_for_log:.{7}f}"})
                 progress_bar.update(10)
+
+                # Log losses for experiments
+                if loss_logger:
+                    loss_logger.log_gs_loss(
+                        iteration=iteration,
+                        total_loss=loss.item(),
+                        l1_loss=Ll1.item(),
+                        ssim_loss=(1.0 - ssim_value).item(),
+                    )
+
             if iteration == opt.iterations:
                 progress_bar.close()
 
@@ -267,6 +310,10 @@ def training(
     end = time()
     train_time = end - start
     # save_time(scene.model_path, '[2] train_joint', train_time)
+
+    # Finalize experiment logging
+    if loss_logger:
+        loss_logger.finalize()
 
 
 def prepare_output_and_logger(args):
