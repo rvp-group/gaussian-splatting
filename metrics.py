@@ -91,7 +91,7 @@ def evaluate(args):
         full_dict[scene_dir] = {}
         per_view_dict[scene_dir] = {}
 
-        test_dir = Path(scene_dir) / "test"
+        test_dir = Path(scene_dir) / args.split
 
         for method in os.listdir(test_dir):
             print("Method:", method)
@@ -305,5 +305,12 @@ if __name__ == "__main__":
         "--model_paths", "-m", required=True, nargs="+", type=str, default=[]
     )
     parser.add_argument("--n_views", default=None, type=int)
+    parser.add_argument(
+        "--split",
+        type=str,
+        default="test",
+        choices=["train", "test"],
+        help="Which split to evaluate (train or test)",
+    )
     args = parser.parse_args()
     evaluate(args)
